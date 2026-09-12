@@ -43,6 +43,7 @@
     </div>
 
     <p class="status" id="videoConnStatus"></p>
+    <p class="status" id="debugStatus" style="font-family:monospace; direction:ltr; text-align:center;"></p>
     <video id="videoPlayer" playsinline></video>
     <div id="playOverlay" class="play-overlay" style="display:none;" onclick="forcePlay()">
         ▶️ برای شروع پخش کلیک کن
@@ -364,8 +365,12 @@
         }
 
         function forcePlay() {
-            playOverlay.style.display = 'none';
-            video.play().catch(() => {});
+            video.play().then(() => {
+                playOverlay.style.display = 'none';
+            }).catch((err) => {
+                debugStatus.innerText = 'خطای پخش: ' + err.name + ' - ' + err.message;
+                playOverlay.style.display = 'flex';
+            });
         }
 
         function toggleMute() {
@@ -387,6 +392,22 @@
                 document.exitFullscreen();
             }
         }
+
+        // ---------- پنل تشخیص فنی (برای پیدا کردن دقیق علت مشکل) ----------
+        const debugStatus = document.getElementById('debugStatus');
+        setInterval(() => {
+            let trackInfo = 'ندارد';
+            if (video.srcObject) {
+                const vTracks = video.srcObject.getVideoTracks();
+                const aTracks = video.srcObject.getAudioTracks();
+                const vt = vTracks[0];
+                const at = aTracks[0];
+                trackInfo = `video-track: ${vt ? `state=${vt.readyState},muted=${vt.muted},enabled=${vt.enabled}` : 'ندارد'} | ` +
+                            `audio-track: ${at ? `state=${at.readyState},muted=${at.muted},enabled=${at.enabled}` : 'ندارد'}`;
+            }
+            debugStatus.innerText =
+                `resolution: ${video.videoWidth}x${video.videoHeight} | readyState: ${video.readyState} | paused: ${video.paused} | muted: ${video.muted}\n${trackInfo}`;
+        }, 1000);
     </script>
 </body>
 </html>
