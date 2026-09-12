@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>تماشای فیلم و چت دونفره پیشرفته</title>
-<!-- کتابخانه پلیر قدرتمند Artplayer برای پشتیبانی از کدک‌های مختلف و زیرنویس -->
 <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <style>
     body { background: #111; color: #fff; text-align: center; font-family: Tahoma; padding: 20px; }
@@ -50,7 +49,6 @@
 
     <p class="status" id="videoConnStatus"></p>
     
-    <!-- جایگاه پلیر حرفه‌ای -->
     <div class="player-container">
         <div id="artplayer"></div>
     </div>
@@ -66,7 +64,6 @@
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script>
-        // استفاده از سرور پایدار و عمومی PeerJS برای رفع خطای اتصال به سرور
         const peer = new Peer(undefined, {
             host: '0.peerjs.com',
             port: 443,
@@ -75,7 +72,6 @@
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
                     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
                     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
                 ]
@@ -96,7 +92,6 @@
         const subInput = document.getElementById('subInput');
         const videoConnStatus = document.getElementById('videoConnStatus');
 
-        // راه‌اندازی پلیر حرفه‌ای Artplayer
         const art = new Artplayer({
             container: '#artplayer',
             url: '',
@@ -115,26 +110,25 @@
             miniProgressBar: true,
         });
 
-        // مدیریت دقیق رویدادهای پخش و استپ برای همگام‌سازی
+        // تنظیمات اجباری برای گوشی جهت جلوگیری از بلاک شدن پخش خودکار
+        art.on('ready', () => {
+            art.video.setAttribute('playsinline', 'true');
+            art.video.setAttribute('webkit-playsinline', 'true');
+        });
+
         art.on('play', () => {
             if (isRemoteTrigger) return;
-            if (isSource) {
-                sendAction('play', art.currentTime);
-            }
+            if (isSource) sendAction('play', art.currentTime);
         });
 
         art.on('pause', () => {
             if (isRemoteTrigger) return;
-            if (isSource) {
-                sendAction('pause', art.currentTime);
-            }
+            if (isSource) sendAction('pause', art.currentTime);
         });
 
         art.on('seek', (currentTime) => {
             if (isRemoteTrigger) return;
-            if (isSource) {
-                sendAction('seek', currentTime);
-            }
+            if (isSource) sendAction('seek', currentTime);
         });
 
         peer.on('open', (id) => { 
@@ -144,8 +138,6 @@
         
         peer.on('error', (err) => { 
             appendSystemMessage("خطای سرور: " + err.type); 
-            myIdText.innerText = "خطا در اتصال به سرور! صفحه را رفرش کنید.";
-            myIdText.style.color = "#ef4444";
         });
         
         peer.on('connection', (connection) => {
@@ -243,7 +235,6 @@
             }, 1000);
         });
 
-        // قابلیت بارگذاری زیرنویس دلخواه
         subInput.addEventListener('change', (e) => {
             const subFile = e.target.files[0];
             if (!subFile) return;
@@ -284,7 +275,14 @@
             call.on('stream', (remoteStream) => {
                 if (isSource) return; 
                 isSource = false;
-                art.switchUrl(remoteStream);
+                
+                // تنظیمات حیاتی برای گوشی دوستتان جهت اجرای استریم
+                art.video.srcObject = remoteStream;
+                art.video.setAttribute('playsinline', 'true');
+                art.play().catch(() => {
+                    appendSystemMessage("⚠️ برای شروع پخش، روی صفحه ویدیو بزنید");
+                });
+
                 updateSourceUI();
                 appendSystemMessage("فیلم الان برای شما پخش میشه 🎬");
             });
