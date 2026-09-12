@@ -17,9 +17,8 @@
     .badge.source { background:#4f46e5; }
     .play-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.75); color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 999; }
     
-    /* کنترل‌ها و نوار زمان */
     .controls { display: flex; align-items: center; justify-content: center; gap: 10px; background: #222; padding: 12px 15px; border-radius: 8px; margin: 10px auto; max-width: 800px; width: 80%; box-sizing: border-box; flex-wrap: wrap; }
-    #seekBar { flex: 1; min-width: 200px; cursor: pointer; }
+    #seekBar { flex: 1; min-width: 150px; cursor: pointer; }
     #timeLabel { font-size: 13px; color: #fff; font-family: monospace; }
 </style>
 </head>
@@ -41,9 +40,9 @@
 
     <p class="status" id="videoConnStatus"></p>
     
-    <video id="videoPlayer" playsinline autoplay></video>
+    <!-- استفاده از کنترل‌های استاندارد پلیر (شامل تمام‌صفحه و تنظیمات) -->
+    <video id="videoPlayer" controls playsinline autoplay></video>
     
-    <!-- دکمه‌ها و نوار زمان پایین ویدیو -->
     <div class="controls">
         <button onclick="remoteAction('play')">▶ پخش</button>
         <button onclick="remoteAction('pause')">⏸ توقف</button>
