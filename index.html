@@ -17,9 +17,10 @@
     .badge.source { background:#4f46e5; }
     .play-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.75); color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 999; }
     
-    .timeline-box { display: flex; align-items: center; gap: 15px; background: #222; padding: 10px 15px; border-radius: 8px; margin: 5px auto 15px; max-width: 800px; width: 80%; box-sizing: border-box; direction: ltr; }
-    .timeline-box input[type="range"] { flex: 1; cursor: pointer; margin: 0; }
-    #timeLabel { font-size: 13px; color: #fff; min-width: 90px; text-align: left; font-family: monospace; }
+    /* کنترل‌ها و نوار زمان */
+    .controls { display: flex; align-items: center; justify-content: center; gap: 10px; background: #222; padding: 12px 15px; border-radius: 8px; margin: 10px auto; max-width: 800px; width: 80%; box-sizing: border-box; flex-wrap: wrap; }
+    #seekBar { flex: 1; min-width: 200px; cursor: pointer; }
+    #timeLabel { font-size: 13px; color: #fff; font-family: monospace; }
 </style>
 </head>
 <body>
@@ -40,11 +41,15 @@
 
     <p class="status" id="videoConnStatus"></p>
     
-    <video id="videoPlayer" controls playsinline autoplay></video>
+    <video id="videoPlayer" playsinline autoplay></video>
     
-    <div class="timeline-box">
-        <span id="timeLabel">00:00 / 00:00</span>
+    <!-- دکمه‌ها و نوار زمان پایین ویدیو -->
+    <div class="controls">
+        <button onclick="remoteAction('play')">▶ پخش</button>
+        <button onclick="remoteAction('pause')">⏸ توقف</button>
         <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+        <span id="timeLabel" class="status">00:00 / 00:00</span>
+        <button onclick="toggleMute()" id="muteBtn">🔇 صدا</button>
     </div>
 
     <div id="playOverlay" class="play-overlay" style="display:none;" onclick="forcePlay()">
@@ -89,6 +94,7 @@
         const playOverlay = document.getElementById('playOverlay');
         const seekBar = document.getElementById('seekBar');
         const timeLabel = document.getElementById('timeLabel');
+        const muteBtn = document.getElementById('muteBtn');
 
         peer.on('open', (id) => { myIdText.innerText = "شناسه شما: " + id + " (این را برای دوستت بفرست)"; });
         peer.on('error', (err) => { appendSystemMessage("خطا: " + err.type); });
@@ -157,7 +163,7 @@
             isSource = true;
             video.srcObject = null;
             video.src = URL.createObjectURL(file);
-            video.muted = false; // صدای میزبان باز باشد
+            video.muted = false;
             attemptPlay();
             
             updateSourceUI();
@@ -165,12 +171,8 @@
 
             video.onloadeddata = () => {
                 try {
-                    // گرفتن ترک‌های ویدیو و صدای خودِ تگ ویدیو به صورت مستقل و بدون تداخل میکروفون
                     const videoStream = video.captureStream ? video.captureStream(30) : video.mozCaptureStream(30);
-                    
-                    if (videoStream) {
-                        localStream = videoStream;
-                    }
+                    if (videoStream) { localStream = videoStream; }
 
                     if (localStream && (peerIdInput.value.trim() || (conn && conn.open))) {
                         const targetId = conn ? conn.peer : peerIdInput.value.trim();
@@ -183,25 +185,19 @@
 
         async function startScreenShare() {
             try {
-                // درخواست استریم صفحه همراه با صدای سیستم/تب با فیلترهای استاندارد
                 const stream = await navigator.mediaDevices.getDisplayMedia({ 
                     video: { frameRate: 30 }, 
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false
-                    } 
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
                 });
                 isSource = true;
                 localStream = stream;
                 video.srcObject = stream;
                 video.src = '';
-                video.muted = true; // قطع صدای سیستم خودمان برای جلوگیری از اکو
+                video.muted = true;
                 attemptPlay();
                 
                 updateSourceUI();
                 sourceStatus.innerText = "پخش: استریم صفحه نمایش";
-                appendSystemMessage("استریم صفحه با موفقیت شروع شد.");
 
                 if (peerIdInput.value.trim() || (conn && conn.open)) {
                     const targetId = conn ? conn.peer : peerIdInput.value.trim();
@@ -221,7 +217,7 @@
                 isSource = false;
                 video.srcObject = remoteStream;
                 video.src = '';
-                video.muted = false; // برای گیرنده صدای فیلم آزاد است
+                video.muted = false;
                 attemptPlay();
                 updateSourceUI();
                 appendSystemMessage("فیلم الان برای شما پخش میشه 🎬");
@@ -240,13 +236,24 @@
             }
         }
 
-        video.addEventListener('play', () => {
-            if (!isRemoteTrigger && conn && conn.open) conn.send({ type: 'remote-control', action: 'play' });
-        });
+        function remoteAction(action) {
+            if (isSource) {
+                applyLocalAction(action, video.currentTime);
+                if (conn && conn.open) conn.send({ type: 'remote-control', action, time: video.currentTime });
+            } else {
+                if (conn && conn.open) conn.send({ type: 'remote-control', action, time: video.currentTime });
+            }
+        }
 
-        video.addEventListener('pause', () => {
-            if (!isRemoteTrigger && conn && conn.open) conn.send({ type: 'remote-control', action: 'pause' });
-        });
+        function applyLocalAction(action, time) {
+            isRemoteTrigger = true;
+            if (action === 'play') attemptPlay();
+            if (action === 'pause') video.pause();
+            if (action === 'seek' && typeof time === 'number') {
+                if (isSource) video.currentTime = time;
+            }
+            setTimeout(() => isRemoteTrigger = false, 500); 
+        }
 
         video.addEventListener('timeupdate', () => {
             if (isSource) {
@@ -264,25 +271,13 @@
             
             if (isSource) {
                 targetTime = (seekBar.value / 100) * (video.duration || 0);
-                applyLocalAction('seek', targetTime);
+                video.currentTime = targetTime;
+                if (conn && conn.open) conn.send({ type: 'remote-control', action: 'seek', time: targetTime });
             } else {
                 targetTime = (seekBar.value / 100) * remoteDuration;
-                if (conn && conn.open) {
-                    conn.send({ type: 'remote-control', action: 'seek', time: targetTime });
-                }
+                if (conn && conn.open) conn.send({ type: 'remote-control', action: 'seek', time: targetTime });
             }
         });
-
-        function applyLocalAction(action, time) {
-            isRemoteTrigger = true;
-            if (action === 'play') attemptPlay();
-            if (action === 'pause') video.pause();
-            if (action === 'seek' && isSource && typeof time === 'number') {
-                video.currentTime = time;
-                updateLocalTimeLabel();
-            }
-            setTimeout(() => isRemoteTrigger = false, 500); 
-        }
 
         function updateLocalTimeLabel() {
             const cur = video.currentTime || 0, dur = video.duration || 0;
@@ -298,6 +293,11 @@
         function fmt(sec) {
             if (!isFinite(sec) || isNaN(sec)) return "00:00";
             return Math.floor(sec / 60).toString().padStart(2, '0') + ":" + Math.floor(sec % 60).toString().padStart(2, '0');
+        }
+
+        function toggleMute() {
+            video.muted = !video.muted;
+            muteBtn.innerText = video.muted ? '🔊 صدا' : '🔇 صدا';
         }
 
         function updateSourceUI() {
