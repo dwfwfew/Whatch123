@@ -115,8 +115,18 @@
         background: #000; 
         border: 1px solid var(--border-color);
         margin-bottom: 15px;
+        position: relative;
     }
     #artplayer { width: 100%; height: 420px; }
+    
+    /* ویدیو کمکی برای دریافت استریم توسط دوست */
+    #remoteVideo {
+        width: 100%;
+        height: 420px;
+        background: #000;
+        object-fit: contain;
+        display: none;
+    }
 
     .chat-box-wrapper {
         background: var(--card-bg);
@@ -165,13 +175,17 @@
             </div>
 
             <div class="box">
-                <h3>۲. پخش فیلم برای دو نفر</h3>
-                <button onclick="startScreenShare()" class="btn-green">📺 پخش زنده فیلم (اشتراک تب با صدا)</button>
-                <label class="file-upload-btn" style="margin-top: 8px;">
+                <h3>۲. انتخاب فیلم و زیرنویس</h3>
+                <label class="file-upload-btn">
+                    📁 انتخاب فایل فیلم از سیستم
+                    <input type="file" id="fileInput" accept="video/*">
+                </label>
+                <label class="file-upload-btn">
                     📝 انتخاب زیرنویس (SRT)
                     <input type="file" id="subInput" accept=".srt,.vtt">
                 </label>
-                <p class="status" id="sourceStatus" style="margin-top: 6px;">برای شروع پخش، روی دکمه سبز بزنید</p>
+                <button onclick="startScreenShareFallback()" class="btn-green" style="margin-top: 4px;">📺 حالت اضطراری (اشتراک تب)</button>
+                <p class="status" id="sourceStatus" style="margin-top: 6px;">هنوز فیلمی انتخاب نشده</p>
             </div>
         </div>
 
@@ -179,6 +193,7 @@
         
         <div class="player-container">
             <div id="artplayer"></div>
+            <video id="remoteVideo" autoplay playsinline controls style="display: none; width: 100%; height: 420px;"></video>
         </div>
 
         <div class="chat-box-wrapper">
@@ -215,26 +230,44 @@
         const sourceStatus = document.getElementById('sourceStatus');
         const chatBox = document.getElementById('chatBox');
         const messageInput = document.getElementById('messageInput');
+        const fileInput = document.getElementById('fileInput');
         const subInput = document.getElementById('subInput');
         const videoConnStatus = document.getElementById('videoConnStatus');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const artContainer = document.getElementById('artplayer');
 
         const art = new Artplayer({
             container: '#artplayer',
             url: '',
             volume: 0.8,
-            isLive: true,
+            isLive: false,
             muted: false,
             autoplay: true,
             pip: true,
             fullscreen: true,
             fullscreenWeb: true,
             setting: true,
-            playbackRate: false,
+            playbackRate: true,
             aspectRatio: true,
             subtitleOffset: true,
             lock: true,
             miniProgressBar: true,
             theme: '#8b5cf6',
+        });
+
+        art.on('play', () => {
+            if (isRemoteTrigger) return;
+            if (isSource) sendAction('play', art.currentTime);
+        });
+
+        art.on('pause', () => {
+            if (isRemoteTrigger) return;
+            if (isSource) sendAction('pause', art.currentTime);
+        });
+
+        art.on('seek', (currentTime) => {
+            if (isRemoteTrigger) return;
+            if (isSource) sendAction('seek', currentTime);
         });
 
         peer.on('open', (id) => { myIdText.innerText = "شناسه شما: " + id; });
@@ -274,6 +307,9 @@
                 if (data.type === 'chat') { 
                     appendMessage("عشقت: " + data.text, 'peer'); 
                 }
+                else if (data.type === 'remote-control') {
+                    applyRemoteAction(data.action, data.time);
+                }
             });
         }
 
@@ -281,11 +317,28 @@
             try {
                 if (currentCall) currentCall.close();
                 currentCall = peer.call(targetId, localStream);
-                handleIncomingCall(currentCall);
-                videoConnStatus.innerText = "🟢 تصویر و صدای فیلم برای عشقت ارسال شد.";
+                videoConnStatus.innerText = "🟢 استریم فیلم مستقیماً برای عشقت ارسال شد.";
             } catch (ex) {
                 console.error("Call error:", ex);
             }
+        }
+
+        function sendAction(action, time) {
+            if (conn && conn.open) {
+                conn.send({ type: 'remote-control', action, time });
+            }
+        }
+
+        function applyRemoteAction(action, time) {
+            isRemoteTrigger = true;
+            if (action === 'play') {
+                art.play();
+            } else if (action === 'pause') {
+                art.pause();
+            } else if (action === 'seek' && typeof time === 'number') {
+                art.currentTime = time;
+            }
+            setTimeout(() => { isRemoteTrigger = false; }, 400);
         }
 
         function sendMessage() {
@@ -306,41 +359,51 @@
 
         function appendSystemMessage(text) {
             const div = document.createElement('div');
-            div.className, div.className = 'chat-msg sys';
+            div.className = 'chat-msg sys';
             div.innerText = text;
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        // روش بی‌نقص اشتراک‌گذاری تب مرورگر برای انتقال تصویر بدون سیاهی
-        async function startScreenShare() {
-            try {
-                const stream = await navigator.mediaDevices.getDisplayMedia({ 
-                    video: { frameRate: 30 }, 
-                    audio: true 
-                });
-                isSource = true;
-                localStream = stream;
-                art.switchUrl(stream);
-                
-                sourceStatus.innerHTML = '<span class="badge source">شما میزبان فیلم هستید ✨</span>';
+        // انتخاب فایل فیلم از سیستم میزبان
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
 
-                // اگر کسی استریم رو بست، ریست بشه
-                stream.getVideoTracks()[0].onended = () => {
-                    appendSystemMessage("پخش زنده متوقف شد.");
-                    isSource = false;
-                };
+            isSource = true;
+            const fileURL = URL.createObjectURL(file);
+            art.switchUrl(fileURL);
+            
+            sourceStatus.innerHTML = '<span class="badge source">شما میزبان فیلم هستید ✨</span>';
+            
+            // مخفی کردن پلیر کمکی و نمایش اصلی برای میزبان
+            remoteVideo.style.display = 'none';
+            artContainer.style.display = 'block';
 
-                const targetId = conn ? conn.peer : peerIdInput.value.trim();
-                if (targetId) {
-                    sendStreamToPeer(targetId);
+            setTimeout(async () => {
+                try {
+                    const videoEl = art.video;
+                    if (videoEl.readyState < 2) {
+                        await new Promise(resolve => videoEl.onloadeddata = resolve);
+                    }
+                    
+                    // استخراج مستقیم استریم ویدیویی و صوتی از تگ ویدیو
+                    if (videoEl.captureStream) {
+                        localStream = videoEl.captureStream();
+                    } else if (videoEl.mozCaptureStream) {
+                        localStream = videoEl.mozCaptureStream();
+                    }
+
+                    const targetId = conn ? conn.peer : peerIdInput.value.trim();
+                    if (localStream && targetId) {
+                        sendStreamToPeer(targetId);
+                    }
+                } catch (ex) {
+                    console.error("Capture stream error:", ex);
+                    appendSystemMessage("خطا در استریم خودکار فیلم. از دکمه حالت اضطراری استفاده کنید.");
                 }
-            }, err => {
-                appendSystemMessage("خطا در اشتراک‌گذاری: " + err.message);
-            } catch (err) {
-                appendSystemMessage("اشتراک‌گذاری لغو شد.");
-            }
-        }
+            }, 1200);
+        });
 
         subInput.addEventListener('change', (e) => {
             const subFile = e.target.files[0];
@@ -353,12 +416,47 @@
             appendSystemMessage("زیرنویس فعال شد: " + subFile.name);
         });
 
+        // حالت جایگزین اضطراری (اشتراک تب مرورگر) در صورت عدم پشتیبانی مرورگر از captureStream فایل محلی
+        async function startScreenShareFallback() {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ 
+                    video: { frameRate: 30 }, 
+                    audio: true 
+                });
+                isSource = true;
+                localStream = stream;
+                
+                artContainer.style.display = 'none';
+                remoteVideo.style.display = 'block';
+                remoteVideo.srcObject = stream;
+
+                sourceStatus.innerHTML = '<span class="badge source">میزبان (پخش تب اضطراری) ✨</span>';
+
+                stream.getVideoTracks()[0].onended = () => {
+                    appendSystemMessage("پخش متوقف شد.");
+                    isSource = false;
+                };
+
+                const targetId = conn ? conn.peer : peerIdInput.value.trim();
+                if (targetId) {
+                    sendStreamToPeer(targetId);
+                }
+            } catch (err) {
+                appendSystemMessage("خطا در اشتراک‌گذاری: " + err.message);
+            }
+        }
+
         function handleIncomingCall(call) {
             videoConnStatus.innerText = "🟣 در حال دریافت فیلم از طرف مقابل...";
 
             call.on('stream', (remoteStream) => {
                 isSource = false;
-                art.switchUrl(remoteStream);
+                
+                // برای دوست (مهمان)، ویدیو به صورت مستقیم و بدون تأخیر در باکس نمایش داده می‌شود
+                artContainer.style.display = 'none';
+                remoteVideo.style.display = 'block';
+                remoteVideo.srcObject = remoteStream;
+
                 sourceStatus.innerHTML = '<span class="badge">در حال تماشای فیلمِ طرف مقابل 🎬</span>';
                 videoConnStatus.innerText = "🟢 فیلم با موفقیت برای شما پخش شد 🍿";
                 appendSystemMessage("فیلم برای شما پخش شد!");
