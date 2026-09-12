@@ -42,6 +42,7 @@
         <p class="status" id="sourceStatus"></p>
     </div>
 
+    <p class="status" id="videoConnStatus"></p>
     <video id="videoPlayer" playsinline></video>
     <div id="playOverlay" class="play-overlay" style="display:none;" onclick="forcePlay()">
         ▶️ برای شروع پخش کلیک کن
@@ -105,6 +106,7 @@
         const messageInput = document.getElementById('messageInput');
         const fileInput = document.getElementById('fileInput');
         const video = document.getElementById('videoPlayer');
+        const videoConnStatus = document.getElementById('videoConnStatus');
         const seekBar = document.getElementById('seekBar');
         const timeLabel = document.getElementById('timeLabel');
 
@@ -126,23 +128,7 @@
         // وقتی طرف مقابل تماس مدیا (استریم فیلم) میفرسته
         peer.on('call', (call) => {
             call.answer(); // خودمون چیزی برای فرستادن نداریم، فقط دریافت می‌کنیم
-            mediaCall = call;
-            call.on('stream', (remoteStream) => {
-                isSource = false;
-                video.srcObject = remoteStream;
-                video.src = '';
-                video.muted = true; // پخش بی‌صدا برای عبور از قانون autoplay مرورگرها
-                updateMuteBtn();
-                attemptPlay();
-                updateSourceUI();
-                appendSystemMessage("فیلم دوستت الان برات پخش میشه 🎬 (فعلاً بی‌صدا؛ برای فعال کردن صدا دکمه‌ی 🔇 رو بزن)");
-            });
-            call.on('error', (err) => {
-                appendSystemMessage("⚠️ خطا در دریافت استریم فیلم: " + err);
-            });
-            call.on('close', () => {
-                appendSystemMessage("استریم فیلم قطع شد.");
-            });
+            handleIncomingOrOutgoingCall(call, false);
         });
 
         function connectToPeer() {
@@ -228,10 +214,60 @@
             const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
             if (peerIdInput.value.trim() || conn) {
                 const targetId = conn ? conn.peer : peerIdInput.value.trim();
-                mediaCall = peer.call(targetId, stream);
+                const call = peer.call(targetId, stream);
+                handleIncomingOrOutgoingCall(call, true, stream);
             }
             appendSystemMessage("فیلم انتخاب شد و شروع به استریم برای دوستت کرد.");
         });
+
+        // مدیریت مشترک برای تماس ورودی (دریافت‌کننده) و خروجی (فرستنده)
+        // به همراه تشخیص واقعی وصل‌شدن اتصال ویدیویی (نه فقط رویداد stream)
+        function handleIncomingOrOutgoingCall(call, isOutgoing, outgoingStream) {
+            mediaCall = call;
+            videoConnStatus.innerText = "🟡 در حال برقراری اتصال ویدیویی...";
+
+            call.on('stream', (remoteStream) => {
+                if (isOutgoing) return; // خودمون فرستنده‌ایم، نیازی به srcObject نداریم
+                isSource = false;
+                video.srcObject = remoteStream;
+                video.src = '';
+                video.muted = true; // پخش بی‌صدا برای عبور از قانون autoplay مرورگرها
+                updateMuteBtn();
+                attemptPlay();
+                updateSourceUI();
+                appendSystemMessage("فیلم دوستت الان برات پخش میشه 🎬 (فعلاً بی‌صدا؛ برای فعال کردن صدا دکمه‌ی 🔇 رو بزن)");
+            });
+
+            call.on('error', (err) => {
+                videoConnStatus.innerText = "🔴 خطا در تماس ویدیویی: " + err;
+            });
+
+            call.on('close', () => {
+                videoConnStatus.innerText = "🔴 اتصال ویدیویی قطع شد.";
+            });
+
+            // مهم‌ترین بخش: چک کردن وضعیت واقعیِ اتصال WebRTC مخصوص ویدیو
+            // (چون ممکنه اتصال دیتا/چت وصل بشه ولی اتصال ویدیو جدا شکست بخوره)
+            const pc = call.peerConnection;
+            if (pc) {
+                pc.oniceconnectionstatechange = () => {
+                    const state = pc.iceConnectionState;
+                    if (state === 'connected' || state === 'completed') {
+                        videoConnStatus.innerText = "🟢 اتصال ویدیویی برقرار است.";
+                    } else if (state === 'failed' || state === 'disconnected') {
+                        videoConnStatus.innerText = "🔴 اتصال ویدیویی برقرار نشد (state: " + state + "). لطفاً هر دو نفر به وای‌فای وصل بشید و صفحه رو رفرش کنید.";
+                        if (isOutgoing && state === 'failed') {
+                            // یک بار تلاش مجدد خودکار
+                            setTimeout(() => {
+                                appendSystemMessage("تلاش مجدد برای اتصال ویدیویی...");
+                                const retryCall = peer.call(call.peer, outgoingStream);
+                                handleIncomingOrOutgoingCall(retryCall, true, outgoingStream);
+                            }, 1500);
+                        }
+                    }
+                };
+            }
+        }
 
         // ---------- کنترل پخش (هر دو نفر می‌توانند استفاده کنند) ----------
         function remoteAction(action) {
