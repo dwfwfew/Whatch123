@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>تماشای فیلم و چت دونفره پیشرفته</title>
+<title>تماشای فیلم و چت دونفره همگام</title>
 <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <style>
     body { background: #111; color: #fff; text-align: center; font-family: Tahoma; padding: 20px; }
@@ -16,8 +16,6 @@
     input[type="file"] { padding: 8px; background: #333; color: #fff; border-radius: 5px; border: none; margin: 5px; cursor: pointer; }
     button { padding: 8px; border-radius: 5px; border: none; background: #4f46e5; color: #fff; cursor: pointer; margin: 2px; }
     .status { font-size: 13px; color: #9ca3af; margin-top: 6px; text-align: center; }
-    .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; background:#333; }
-    .badge.source { background:#4f46e5; }
 </style>
 </head>
 <body>
@@ -34,20 +32,15 @@
     <div class="box">
         <h3>انتخاب فیلم و زیرنویس</h3>
         <div>
-            <label>انتخاب فیلم: </label>
+            <label>انتخاب فیلم (هر دو نفر باید یک فیلم را انتخاب کنند): </label>
             <input type="file" id="fileInput" accept="video/*">
         </div>
         <div style="margin-top: 8px;">
             <label>انتخاب زیرنویس (SRT): </label>
             <input type="file" id="subInput" accept=".srt,.vtt">
         </div>
-        <div style="text-align: center;">
-            <button onclick="startScreenShare()" style="background:#10b981; margin-top:10px;">📺 اشتراک‌گذاری تب (با صدا)</button>
-        </div>
-        <p class="status" id="sourceStatus"></p>
+        <p class="status" id="sourceStatus">لطفاً فایل ویدیو را انتخاب کنید تا زمان و کنترل‌ها فعال شوند.</p>
     </div>
-
-    <p class="status" id="videoConnStatus"></p>
     
     <div class="player-container">
         <div id="artplayer"></div>
@@ -78,9 +71,7 @@
             }
         });
         let conn = null;          
-        let isSource = false;     
         let isRemoteTrigger = false;
-        let localStream = null;
 
         const myIdText = document.getElementById('myId');
         const peerIdInput = document.getElementById('peerIdInput');
@@ -90,7 +81,6 @@
         const messageInput = document.getElementById('messageInput');
         const fileInput = document.getElementById('fileInput');
         const subInput = document.getElementById('subInput');
-        const videoConnStatus = document.getElementById('videoConnStatus');
 
         const art = new Artplayer({
             container: '#artplayer',
@@ -98,7 +88,7 @@
             volume: 0.7,
             isLive: false,
             muted: false,
-            autoplay: true,
+            autoplay: false,
             pip: true,
             fullscreen: true,
             fullscreenWeb: true,
@@ -115,7 +105,7 @@
             art.video.setAttribute('webkit-playsinline', 'true');
         });
 
-        // کنترل دوطرفه: هر کسی (تو یا دوستت) روی پخش، توقف یا جستجو بزند، برای دیگری هم اعمال می‌شود
+        // کنترل دوطرفه کامل روی تایم‌لاین و وضعیت پخش
         art.on('play', () => {
             if (isRemoteTrigger) return;
             sendAction('play', art.currentTime);
@@ -128,6 +118,7 @@
 
         art.on('seek', (currentTime) => {
             if (isRemoteTrigger) return;
+            // جلوگیری از اختلاف زمانی جزئی (اختلاف کمتر از 1 ثانیه نادیده گرفته شود تا لوپ نشود)
             sendAction('seek', currentTime);
         });
 
@@ -146,11 +137,6 @@
             setupDataConnection();
         });
 
-        peer.on('call', (call) => {
-            if (isSource && localStream) { call.answer(localStream); } else { call.answer(); }
-            handleIncomingOrOutgoingCall(call);
-        });
-
         function connectToPeer() {
             const id = peerIdInput.value.trim();
             if (!id) return;
@@ -163,10 +149,6 @@
             conn.on('open', () => {
                 connStatus.innerText = "اتصال برقرار است ✔";
                 appendSystemMessage("اتصال با موفقیت برقرار شد!");
-                if (isSource && localStream) {
-                    const call = peer.call(conn.peer, localStream);
-                    handleIncomingOrOutgoingCall(call);
-                }
             });
             conn.on('error', (err) => { connStatus.innerText = "⚠️ خطا: " + err.message; });
             conn.on('close', () => { connStatus.innerText = "❌ اتصال قطع شد."; });
@@ -193,9 +175,12 @@
             } else if (action === 'pause') {
                 art.pause();
             } else if (action === 'seek' && typeof time === 'number') {
-                art.currentTime = time;
+                // فقط اگر اختلاف زمانی بیشتر از 1.5 ثانیه بود پوزیشن را عوض کن تا پرش ایجاد نشود
+                if (Math.abs(art.currentTime - time) > 1.5) {
+                    art.currentTime = time;
+                }
             }
-            setTimeout(() => { isRemoteTrigger = false; }, 400);
+            setTimeout(() => { isRemoteTrigger = false; }, 500);
         }
 
         function sendMessage() {
@@ -209,30 +194,15 @@
         function appendMessage(text) { chatBox.innerHTML += `<div>${text}</div>`; chatBox.scrollTop = chatBox.scrollHeight; }
         function appendSystemMessage(text) { chatBox.innerHTML += `<div style="color:#10b981;">${text}</div>`; chatBox.scrollTop = chatBox.scrollHeight; }
 
-        fileInput.addEventListener('change', async (e) => {
+        // بارگذاری فایل ویدیو به صورت محلی روی گوشی و کامپیوتر (باعث نمایان شدن تایم دقیق فیلم می‌شود)
+        fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            isSource = true;
             const fileURL = URL.createObjectURL(file);
             art.switchUrl(fileURL);
-            
-            updateSourceUI();
-            sourceStatus.innerText = "در حال پخش: " + file.name;
-
-            setTimeout(() => {
-                try {
-                    const videoEl = art.video;
-                    const videoStream = videoEl.captureStream ? videoEl.captureStream(30) : videoEl.mozCaptureStream(30);
-                    if (videoStream) { localStream = videoStream; }
-
-                    if (localStream && (peerIdInput.value.trim() || (conn && conn.open))) {
-                        const targetId = conn ? conn.peer : peerIdInput.value.trim();
-                        const call = peer.call(targetId, localStream);
-                        handleIncomingOrOutgoingCall(call);
-                    }
-                } catch (ex) { console.error("CaptureStream error:", ex); }
-            }, 1000);
+            sourceStatus.innerText = "فایل بارگذاری شد: " + file.name + " (تایم و کنترل‌ها فعال شد)";
+            appendSystemMessage("ویدیو با موفقیت روی پلیر بارگذاری شد.");
         });
 
         subInput.addEventListener('change', (e) => {
@@ -243,65 +213,8 @@
                 name: subFile.name,
                 type: subFile.name.endsWith('.vtt') ? 'vtt' : 'srt',
             });
-            appendSystemMessage("زیرنویس با موفقیت اضافه شد: " + subFile.name);
+            appendSystemMessage("زیرنویس اضافه شد: " + subFile.name);
         });
-
-        async function startScreenShare() {
-            try {
-                const stream = await navigator.mediaDevices.getDisplayMedia({ 
-                    video: { frameRate: 30 }, 
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
-                });
-                isSource = true;
-                localStream = stream;
-                art.switchUrl(stream);
-                
-                updateSourceUI();
-                sourceStatus.innerText = "پخش: استریم صفحه نمایش";
-
-                if (peerIdInput.value.trim() || (conn && conn.open)) {
-                    const targetId = conn ? conn.peer : peerIdInput.value.trim();
-                    const call = peer.call(targetId, localStream);
-                    handleIncomingOrOutgoingCall(call);
-                }
-            } catch (err) {
-                appendSystemMessage("خطا در اشتراک صفحه: " + err.message);
-            }
-        }
-
-        function handleIncomingOrOutgoingCall(call) {
-            videoConnStatus.innerText = "🟡 در حال برقراری اتصال ویدیویی...";
-
-            call.on('stream', (remoteStream) => {
-                if (isSource) return; 
-                isSource = false;
-                
-                art.video.srcObject = remoteStream;
-                art.video.setAttribute('playsinline', 'true');
-                art.play().catch(() => {
-                    appendSystemMessage("⚠️ برای شروع پخش، روی صفحه ویدیو بزنید");
-                });
-
-                updateSourceUI();
-                appendSystemMessage("فیلم الان برای شما پخش میشه 🎬");
-            });
-
-            call.on('error', (err) => { videoConnStatus.innerText = "🔴 خطا در تماس ویدیویی: " + err; });
-            call.on('close', () => { videoConnStatus.innerText = "🔴 اتصال ویدیویی قطع شد."; });
-
-            const pc = call.peerConnection;
-            if (pc) {
-                pc.oniceconnectionstatechange = () => {
-                    const state = pc.iceConnectionState;
-                    if (state === 'connected' || state === 'completed') videoConnStatus.innerText = "🟢 اتصال ویدیویی برقرار است.";
-                    else if (state === 'failed' || state === 'disconnected') videoConnStatus.innerText = "🔴 اتصال ویدیویی ضعیف است یا قطع شد.";
-                };
-            }
-        }
-
-        function updateSourceUI() {
-            sourceStatus.innerHTML = isSource ? '<span class="badge source">صاحب فیلم تو هستی</span>' : '<span class="badge">داری استریم دوستت رو می‌بینی</span>';
-        }
     </script>
 </body>
 </html>
