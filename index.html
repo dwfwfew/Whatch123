@@ -110,25 +110,25 @@
             miniProgressBar: true,
         });
 
-        // تنظیمات اجباری برای گوشی جهت جلوگیری از بلاک شدن پخش خودکار
         art.on('ready', () => {
             art.video.setAttribute('playsinline', 'true');
             art.video.setAttribute('webkit-playsinline', 'true');
         });
 
+        // کنترل دوطرفه: هر کسی (تو یا دوستت) روی پخش، توقف یا جستجو بزند، برای دیگری هم اعمال می‌شود
         art.on('play', () => {
             if (isRemoteTrigger) return;
-            if (isSource) sendAction('play', art.currentTime);
+            sendAction('play', art.currentTime);
         });
 
         art.on('pause', () => {
             if (isRemoteTrigger) return;
-            if (isSource) sendAction('pause', art.currentTime);
+            sendAction('pause', art.currentTime);
         });
 
         art.on('seek', (currentTime) => {
             if (isRemoteTrigger) return;
-            if (isSource) sendAction('seek', currentTime);
+            sendAction('seek', currentTime);
         });
 
         peer.on('open', (id) => { 
@@ -276,7 +276,6 @@
                 if (isSource) return; 
                 isSource = false;
                 
-                // تنظیمات حیاتی برای گوشی دوستتان جهت اجرای استریم
                 art.video.srcObject = remoteStream;
                 art.video.setAttribute('playsinline', 'true');
                 art.play().catch(() => {
