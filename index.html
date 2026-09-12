@@ -6,15 +6,12 @@
 <title>تماشای فیلم و چت دونفره</title>
 <style>
     body { background: #111; color: #fff; text-align: center; font-family: Tahoma; padding: 20px; }
-    video { width: 80%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background:#000; }
+    video { width: 80%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background:#000; margin-top: 15px; }
     .box { background: #222; padding: 15px; border-radius: 8px; margin: 10px auto; max-width: 800px; }
     #chatBox { height: 120px; overflow-y: auto; background: #1a1a1a; padding: 10px; border-radius: 5px; text-align: right; margin-bottom: 10px; font-size: 14px; }
     input, button { padding: 8px; border-radius: 5px; border: none; }
     input[type="text"] { width: 70%; }
     button { background: #4f46e5; color: #fff; cursor: pointer; margin: 2px; }
-    button:disabled { background: #444; cursor: not-allowed; }
-    .controls { display:flex; align-items:center; justify-content:center; gap:10px; margin-top:10px; flex-wrap: wrap; }
-    #seekBar { flex:1; min-width:200px; }
     .status { font-size: 13px; color: #9ca3af; margin-top: 6px; }
     .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; background:#333; }
     .badge.source { background:#4f46e5; }
@@ -37,29 +34,21 @@
 
     <div class="box">
         <h3>انتخاب فایل فیلم یا استریم صفحه</h3>
-        <p class="status">اگر پخش مستقیم فایل در گوشی دوستت مشکل داشت، از دکمه «اشتراک تب» استفاده کن.</p>
         <input type="file" id="fileInput" accept="video/*">
         <button onclick="startScreenShare()" style="background:#10b981; margin-top:10px;">📺 اشتراک‌گذاری تب (با صدا)</button>
         <p class="status" id="sourceStatus"></p>
     </div>
 
     <p class="status" id="videoConnStatus"></p>
-    <p class="status" id="debugStatus" style="font-family:monospace; direction:ltr; text-align:center;"></p>
-    <video id="videoPlayer" playsinline autoplay></video>
+    
+    <!-- پلیر با کنترل‌های استاندارد مرورگر (دکمه‌های اختصاصی حذف شدند) -->
+    <video id="videoPlayer" controls playsinline autoplay></video>
+    
     <div id="playOverlay" class="play-overlay" style="display:none;" onclick="forcePlay()">
-        ▶️ برای شروع پخش کلیک کن
+        ▶️ برای شروع پخش کلیک کن (رفع محدودیت مرورگر)
     </div>
 
-    <div class="controls">
-        <button id="playBtn" onclick="remoteAction('play')">▶ پخش</button>
-        <button id="pauseBtn" onclick="remoteAction('pause')">⏸ توقف</button>
-        <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
-        <span id="timeLabel" class="status">۰۰:۰۰ / ۰۰:۰۰</span>
-        <button id="muteBtn" onclick="toggleMute()">🔇 صدا</button>
-        <button id="fullscreenBtn" onclick="toggleFullscreen()">⛶ تمام‌صفحه</button>
-    </div>
-
-    <div class="box">
+    <div class="box" style="margin-top: 15px;">
         <h3>چت آنلاین</h3>
         <div id="chatBox"></div>
         <input type="text" id="messageInput" placeholder="پیام خود را بنویسید...">
@@ -82,7 +71,6 @@
         let mediaCall = null;     
         let isSource = false;     
         let isRemoteTrigger = false;
-        let seekDragging = false;
         let localStream = null;
 
         const myIdText = document.getElementById('myId');
@@ -94,10 +82,7 @@
         const fileInput = document.getElementById('fileInput');
         const video = document.getElementById('videoPlayer');
         const videoConnStatus = document.getElementById('videoConnStatus');
-        const seekBar = document.getElementById('seekBar');
-        const timeLabel = document.getElementById('timeLabel');
         const playOverlay = document.getElementById('playOverlay');
-        const muteBtn = document.getElementById('muteBtn');
 
         peer.on('open', (id) => { myIdText.innerText = "شناسه شما: " + id + " (این را برای دوستت بفرست)"; });
         peer.on('error', (err) => { appendSystemMessage("خطا: " + err.type); });
@@ -135,12 +120,7 @@
             conn.on('data', (data) => {
                 if (data.type === 'chat') { appendMessage("دوستت: " + data.text); }
                 else if (data.type === 'remote-control') {
-                    if (!isSource) return;
                     applyLocalAction(data.action, data.time);
-                    broadcastSyncState();
-                } else if (data.type === 'sync-state') {
-                    if (isSource) return;
-                    updateTimeLabelFromRemote(data.time, data.duration);
                 }
             });
         }
@@ -164,13 +144,11 @@
             video.srcObject = null;
             video.src = URL.createObjectURL(file);
             video.muted = false;
-            updateMuteBtn();
             attemptPlay();
             
             updateSourceUI();
             sourceStatus.innerText = "در حال پخش: " + file.name;
 
-            // صبر تا لود کامل متادیتا برای گرفتن صحیح استریم
             video.onloadeddata = () => {
                 try {
                     if (video.captureStream) localStream = video.captureStream(30);
@@ -193,12 +171,12 @@
                 localStream = stream;
                 video.srcObject = stream;
                 video.src = '';
-                video.muted = true; // قطع صدای خودت برای جلوگیری از اکو
+                video.muted = true;
                 attemptPlay();
                 
                 updateSourceUI();
                 sourceStatus.innerText = "پخش: استریم صفحه نمایش";
-                appendSystemMessage("استریم تب شروع شد. (دقت کن تیک Share Audio را در مرورگر زده باشی)");
+                appendSystemMessage("استریم تب شروع شد. (دقت کن تیک Share Audio را زده باشی)");
 
                 if (peerIdInput.value.trim() || (conn && conn.open)) {
                     const targetId = conn ? conn.peer : peerIdInput.value.trim();
@@ -219,11 +197,10 @@
                 isSource = false;
                 video.srcObject = remoteStream;
                 video.src = '';
-                video.muted = true;
-                updateMuteBtn();
+                video.muted = true; // دور زدن محدودیت‌های موبایل
                 attemptPlay();
                 updateSourceUI();
-                appendSystemMessage("فیلم الان برات پخش میشه 🎬 (برای شنیدن صدا دکمه‌ی 🔇 را لمس کنید)");
+                appendSystemMessage("فیلم الان برات پخش میشه 🎬 (از روی پلیر دکمه بلندگو را روشن کن)");
             });
 
             call.on('error', (err) => { videoConnStatus.innerText = "🔴 خطا در تماس ویدیویی: " + err; });
@@ -239,54 +216,34 @@
             }
         }
 
-        function remoteAction(action) {
-            if (isSource) { applyLocalAction(action, video.currentTime); broadcastSyncState(); } 
-            else { if (conn) conn.send({ type: 'remote-control', action, time: video.currentTime }); }
-        }
+        // --- هماهنگ‌سازی رویدادهای پلیر استاندارد ---
+        
+        video.addEventListener('play', () => {
+            if (!isRemoteTrigger && conn && conn.open) {
+                conn.send({ type: 'remote-control', action: 'play' });
+            }
+        });
+
+        video.addEventListener('pause', () => {
+            if (!isRemoteTrigger && conn && conn.open) {
+                conn.send({ type: 'remote-control', action: 'pause' });
+            }
+        });
+
+        video.addEventListener('seeked', () => {
+            if (!isRemoteTrigger && conn && conn.open && isSource) {
+                conn.send({ type: 'remote-control', action: 'seek', time: video.currentTime });
+            }
+        });
 
         function applyLocalAction(action, time) {
             isRemoteTrigger = true;
-            if (typeof time === 'number' && Math.abs(video.currentTime - time) > 1) video.currentTime = time;
             if (action === 'play') attemptPlay();
             if (action === 'pause') video.pause();
-            if (action === 'seek') video.currentTime = time;
-            setTimeout(() => isRemoteTrigger = false, 300);
-        }
-
-        function broadcastSyncState() {
-            if (!conn) return;
-            conn.send({ type: 'sync-state', time: video.currentTime, duration: video.duration || 0 });
-        }
-
-        video.addEventListener('play', () => { if (isSource && !isRemoteTrigger) broadcastSyncState(); });
-        video.addEventListener('pause', () => { if (isSource && !isRemoteTrigger) broadcastSyncState(); });
-        video.addEventListener('timeupdate', () => {
-            if (!seekDragging) updateTimeLabel();
-            if (isSource) broadcastSyncState();
-        });
-
-        seekBar.addEventListener('input', () => { seekDragging = true; });
-        seekBar.addEventListener('change', () => {
-            seekDragging = false;
-            const time = (seekBar.value / 100) * (video.duration || 0);
-            if (isSource) { applyLocalAction('seek', time); broadcastSyncState(); } 
-            else if (conn) { conn.send({ type: 'remote-control', action: 'seek', time }); }
-        });
-
-        function updateTimeLabel() {
-            const cur = video.currentTime || 0, dur = video.duration || 0;
-            if (dur > 0 && !seekDragging) seekBar.value = (cur / dur) * 100;
-            timeLabel.innerText = fmt(cur) + " / " + fmt(dur);
-        }
-
-        function updateTimeLabelFromRemote(time, duration) {
-            if (!seekDragging) seekBar.value = duration > 0 ? (time / duration) * 100 : 0;
-            timeLabel.innerText = fmt(time) + " / " + fmt(duration);
-        }
-
-        function fmt(sec) {
-            if (!isFinite(sec)) return "۰۰:۰۰";
-            return Math.floor(sec / 60).toString().padStart(2, '0') + ":" + Math.floor(sec % 60).toString().padStart(2, '0');
+            if (action === 'seek' && isSource && typeof time === 'number') {
+                video.currentTime = time;
+            }
+            setTimeout(() => isRemoteTrigger = false, 500); // جلوگیری از لوپ بی‌نهایت بین دو پلیر
         }
 
         function updateSourceUI() {
@@ -299,19 +256,7 @@
         }
 
         function forcePlay() {
-            video.play().then(() => { playOverlay.style.display = 'none'; }).catch((err) => { playOverlay.style.display = 'flex'; });
-        }
-
-        function toggleMute() {
-            video.muted = !video.muted;
-            updateMuteBtn();
-            if (!video.muted) attemptPlay();
-        }
-
-        function updateMuteBtn() { muteBtn.innerText = video.muted ? '🔇 صدا' : '🔊 صدا'; }
-        function toggleFullscreen() {
-            if (!document.fullscreenElement) { (video.requestFullscreen || video.webkitRequestFullscreen).call(video).catch(()=>{}); } 
-            else { document.exitFullscreen(); }
+            video.play().then(() => { playOverlay.style.display = 'none'; }).catch(() => { playOverlay.style.display = 'flex'; });
         }
     </script>
 </body>
