@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>تماشای آنلاین دونفره (Watch Together)</title>
+    <style>
+        body { background: #0f172a; color: #f8fafc; font-family: Tahoma, sans-serif; text-align: center; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 15px; }
+        .card { background: #1e293b; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        video { width: 100%; max-height: 450px; background: #000; border-radius: 8px; }
+        #chatBox { height: 130px; overflow-y: auto; background: #0f172a; padding: 10px; border-radius: 6px; text-align: right; margin-bottom: 10px; font-size: 14px; border: 1px solid #334155; }
+        input, button { padding: 10px; border-radius: 6px; border: none; font-family: Tahoma; font-size: 14px; }
+        input[type="text"] { width: 60%; background: #334155; color: #fff; }
+        button { background: #6366f1; color: #fff; cursor: pointer; font-weight: bold; }
+        button:hover { background: #4f46e5; }
+        .btn-green { background: #10b981; }
+        .btn-green:hover { background: #059669; }
+        .row { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>سینمای اختصاصی دونفره</h2>
+
+        <!-- پنل ورود یا ساخت اتاق -->
+        <div id="setupCard" class="card">
+            <h3>ساخت یا ورود به اتاق</h3>
+            <div class="row">
+                <button class="btn-green" onclick="createRoom()">ساخت اتاق جدید (میزبان)</button>
+            </div>
+            <p>یا</p>
+            <div class="row">
+                <input type="text" id="roomCodeInput" placeholder="کد اتاق را وارد کنید...">
+                <button onclick="joinRoom()">ورود به اتاق (مهمان)</button>
+            </div>
+        </div>
+
+        <!-- پنل اصلی اتاق -->
+        <div id="roomCard" class="card hidden">
+            <h3 id="roleTitle">وضعیت: ...</h3>
+            <div class="row" style="margin-bottom: 10px;" id="hostControls">
+                <input type="file" id="fileInput" accept="video/*" style="background:#334151; color:#fff; padding:6px;">
+            </div>
+            
+            <video id="videoPlayer" autoplay playsinline controls></video>
+        </div>
+
+        <!-- پنل چت -->
+        <div id="chatCard" class="card hidden">
+            <h3>گفتگوی زنده</h3>
+            <div id="chatBox"></div>
+            <div class="row">
+                <input type="text" id="messageInput" placeholder="پیام خود را بنویسید..." onkeypress="handleKeyPress(event)">
+                <button onclick="sendMessage()">ارسال</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let pc;
+        let isHost = false;
+        let roomId = "";
+        
+        const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+        function createRoom() {
+            roomId = Math.random().toString(36.substring(2, 8));
+            isHost = true;
+            initWebSocket(roomId);
+        }
+
+        function joinRoom() {
+            const code = document.getElementById('roomCodeInput').value.trim();
+            if (!code) return alert("لطفا کد اتاق را وارد کنید!");
+            roomId = code;
+            isHost = false;
+            initWebSocket(roomId);
+        }
+
+        function initRoomUI() {
+            document.getElementById('setupCard').classList.add('hidden');
+            document.getElementById('roomCard').classList.remove('hidden');
+            document.getElementById('chatCard').classList.remove('hidden');
+            
+            if (isHost) {
+                document.getElementById('roleTitle').innerText = "شما میزبان (Host) هستید";
+                document.getElementById('hostControls').style.display = 'block';
+            } else {
+                document.getElementById('roleTitle').innerText = "شما مهمان (Guest) هستید - در حال دریافت استریم...";
+                document.getElementById('hostControls').style.display = 'none';
+                const v = document.getElementById('videoPlayer');
+                v.controls = false; // مهمان کنترلی روی ویدیو ندارد
+            }
+        }
+
+        function initWebSocket(rId) {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws?room=${rId}`);
+
+            ws.onopen = () => {
+                initRoomUI();
+                appendSystemMessage("به سرور سیگنالینگ متصل شدید. کد اتاق: " + rId);
+            };
+
+            ws.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'peer-joined') {
+                    appendSystemMessage("نفر دوم وارد اتاق شد!");
+                    if (isHost) startWebRTCAsHost();
+                } 
+                else if (data.type === 'offer' && !isHost) {
+                    await handleOffer(data.offer);
+                } 
+                else if (data.type === 'answer' && isHost) {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                } 
+                else if (data.type === 'candidate') {
+                    if (pc) await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } 
+                else if (data.type === 'chat') {
+                    appendMessage(data.sender + ": " + data.text);
+                }
+            };
+        }
+
+        // --- WebRTC Logic ---
+        const video = document.getElementById('videoPlayer');
+        const fileInput = document.getElementById('fileInput');
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                video.src = URL.createObjectURL(file);
+                video.play();
+                appendSystemMessage("فایل ویدیو بارگذاری و پخش شد.");
+                
+                // استریم زنده تصویر و صدا از تگ ویدیو
+                if (isHost && pc) {
+                    const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+                    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                }
+            }
+        });
+
+        async function startWebRTCAsHost() {
+            pc = new RTCPeerConnection(rtcConfig);
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                }
+            };
+
+            // اگر میزبان از قبل ویدیو را باز کرده باشد، استریم را اضافه می‌کنیم
+            if (video.srcObject || video.src) {
+                try {
+                    const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+                    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                } catch(err) {}
+            }
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', offer: offer }));
+        }
+
+        async function handleOffer(offer) {
+            pc = new RTCPeerConnection(rtcConfig);
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                }
+            };
+
+            pc.ontrack = (event) => {
+                if (video.srcObject !== event.streams[0]) {
+                    video.srcObject = event.streams[0];
+                    appendSystemMessage("استریم زنده ویدیوی میزبان دریافت شد!");
+                }
+            };
+
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            ws.send(JSON.stringify({ type: 'answer', answer: answer }));
+        }
+
+        // --- Chat Logic ---
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text) return;
+            ws.send(JSON.stringify({ type: 'chat', text: text, sender: isHost ? 'میزبان' : 'مهمان' }));
+            appendMessage("خودم: " + text);
+            messageInput.value = '';
+        }
+
+        function handleKeyPress(e) { if (e.key === 'Enter') sendMessage(); }
+        function appendMessage(text) { chatBox.innerHTML += `<div>${text}</div>`; chatBox.scrollTop = chatBox.scrollHeight; }
+        function appendSystemMessage(text) { chatBox.innerHTML += `<div style="color: #34d399; font-weight: bold;">${text}</div>`; chatBox.scrollTop = chatBox.scrollHeight; }
+    </script>
+</body>
+</html>
