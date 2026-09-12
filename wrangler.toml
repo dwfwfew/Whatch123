@@ -1,0 +1,15 @@
+name = "watch-together"
+main = "src/worker.js"
+compatibility_date = "2026-09-12"
+
+[assets]
+directory = "public"
+
+[durable_objects]
+bindings = [
+  { name = "ROOM_DO", class_name = "RoomDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RoomDO"]
