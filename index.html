@@ -55,7 +55,31 @@
     <!-- کتابخانه PeerJS برای ارتباط P2P بدون سرور اختصاصی -->
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script>
-        const peer = new Peer();
+        // تنظیمات STUN + TURN رایگان (TURN لازمه وقتی یکی از دو نفر پشت شبکه‌ی
+        // محدود/فایروال سخت‌گیره و اتصال مستقیم P2P ممکن نیست)
+        const peer = new Peer(undefined, {
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    {
+                        urls: 'turn:openrelay.metered.ca:80',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    },
+                    {
+                        urls: 'turn:openrelay.metered.ca:443',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    },
+                    {
+                        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    }
+                ]
+            }
+        });
         let conn = null;          // کانال دیتا: چت + دستورات کنترل
         let mediaCall = null;     // تماس مدیا: استریم زنده فیلم
         let isSource = false;     // آیا فایل فیلم دست خودمه؟
@@ -84,8 +108,8 @@
         // وقتی طرف مقابل خودش بهمون وصل میشه (کانال دیتا)
         peer.on('connection', (connection) => {
             conn = connection;
+            connStatus.innerText = "در حال برقراری اتصال با دوستت...";
             setupDataConnection();
-            connStatus.innerText = "دوستت متصل شد ✔";
         });
 
         // وقتی طرف مقابل تماس مدیا (استریم فیلم) میفرسته
@@ -100,19 +124,42 @@
                 updateSourceUI();
                 appendSystemMessage("فیلم دوستت الان برات پخش میشه 🎬");
             });
+            call.on('error', (err) => {
+                appendSystemMessage("⚠️ خطا در دریافت استریم فیلم: " + err);
+            });
+            call.on('close', () => {
+                appendSystemMessage("استریم فیلم قطع شد.");
+            });
         });
 
         function connectToPeer() {
             const id = peerIdInput.value.trim();
             if (!id) return;
             conn = peer.connect(id);
+            connStatus.innerText = "در حال برقراری اتصال با دوستت...";
             setupDataConnection();
-            connStatus.innerText = "به دوستت وصل شدی ✔";
         }
 
         function setupDataConnection() {
+            // اگه اتصال واقعی تا ۱۰ ثانیه برقرار نشد، به کاربر اطلاع بده
+            const connectTimeout = setTimeout(() => {
+                if (!conn || !conn.open) {
+                    connStatus.innerText = "⚠️ اتصال برقرار نشد. ممکنه یکی از شما پشت شبکه‌ی محدودی باشه. صفحه رو رفرش کنید و دوباره امتحان کنید.";
+                }
+            }, 10000);
+
             conn.on('open', () => {
+                clearTimeout(connectTimeout);
                 connStatus.innerText = "اتصال برقرار است ✔";
+                appendSystemMessage("اتصال با موفقیت برقرار شد!");
+            });
+
+            conn.on('error', (err) => {
+                connStatus.innerText = "⚠️ خطا در اتصال: " + (err.type || err.message || err);
+            });
+
+            conn.on('close', () => {
+                connStatus.innerText = "❌ اتصال قطع شد.";
             });
             conn.on('data', (data) => {
                 if (data.type === 'chat') {
